@@ -95,7 +95,9 @@ tmap_mode("view")
 # tm_shape(polygon) + tm_borders(alpha=.9) +
 tm_shape(points_utm) + tm_dots(col = "Zone", palette = c("red", "black"),
                                size = 0.05, border.col = "black", 
-                               border.lwd = 0.1, border.alpha = 0.2)
+                               border.lwd = 0.1, border.alpha = 0.2) +
+  # We can add labels with the name of each location
+  tm_text("Locality", just = "top", size = 1)
 ```
 
 When you finished, remember to turn of the "view" option and return to the simple/static view ("plot").
