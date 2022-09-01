@@ -1,0 +1,162 @@
+---
+title: 'Mapping & point distance'
+author: "Juan Hernandez-Villena"
+date: "`r format(Sys.Date(),'%e de %B, %Y')`"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: 
+      collapsed: true
+      smooth_scroll: true
+    number_sections: true
+    theme: cerulean
+    highlight: textmate
+editor_options: 
+  chunk_output_type: inline
+---
+
+Acknowledgment:
+
+Material adapted from multiple sources, in particular the course materials of Guy Lansley & James Cheshire (2016)
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,message=FALSE, warning=FALSE)
+```
+
+```{r}
+library(tidyverse)
+#Spatial libraries
+library(sp)
+library(rgdal)
+library(raster)
+# Mapping library
+library(tmap)
+# Interactive maps in tmap
+library(leaflet)
+```
+
+# Import the spatial/non-spatial data
+
+Note: The data points are not real. It was provided only for practice purposes.
+
+First, it is necessary to import the dataset and relevant shapefiles. Its important that all information being in the same projection.
+One of our objetives is to compute the points distances, therefore we are going to work with the _Universal Transverse Mercator (UTM)_. Also, we are working with the _WGS84_ spatial reference system (EPSG:4326).
+
+```{r}
+# Import the coordinates data 
+point <- read.csv("data_point.csv")
+colnames(point)[1] <- "Zone"
+# Check the coordinates column position
+View(point) #  3rd & 4th column
+
+# Define the projection. Recall to write the coordinate in the order Long - Lat (e.g. c(4,3) )
+points <- SpatialPointsDataFrame(point[,c(4,3)], point, proj4string =CRS("+init=EPSG:4326")) #GCS
+# Transform it to UTM projection
+points_utm <- spTransform(points,CRS("+proj=utm +zone=20 +datum=WGS84")) #UTM
+
+#Import the spatial data, and change the projection to UTM
+
+# Administrative boundaries
+polygon <- readOGR(".", "Sifontes") #UTM
+
+#Roads 
+viagcs <- readOGR(".", "Vialidad_Venezuela") #GCS
+vias <- spTransform(viagcs,CRS("+proj=utm +zone=20 +datum=WGS84")) #UTM
+```
+
+# Mapping
+
+## Simple map
+
+Next, using _tm_shape()_ we can load the shapefiles, and then add extra functions  (e.g _tm_borders_, _tm_lines_, _tm_dots_) according to your needs. In our case, we are looking to use multiple shapefiles types (polygon, line, and dots). Recall maintaining a shapefiles order, starting with the last layer (bottom of the map).
+
+```{r}
+
+# Polygon = administrative boundarie
+tm <- tm_shape(polygon) + tm_borders(alpha=.9) +
+# Line = roads
+  tm_shape(vias[polygon,]) + tm_lines(alpha=.9, col = "orange") +
+# Points = localities 
+  tm_shape(points_utm) + tm_dots(col = "red",size = 0.3, border.col = "black", 
+                                 border.lwd = 0.1, border.alpha = 0.2)
+
+tm
+# Save an image
+tmap_save(tm,filename = "map.png")
+```
+
+## Interactive map 
+
+Changing the _tmap_mode_ to "view" we can create an interactive map, adding all the attributes from the relevant layer (points), but with the advantage to zoom in and out, and even turn layers on and off.
+```{r}
+tmap_mode("view")
+
+# tm_shape(polygon) + tm_borders(alpha=.9) +
+tm_shape(points_utm) + tm_dots(col = "Zone", palette = c("red", "black"),
+                               size = 0.05, border.col = "black", 
+                               border.lwd = 0.1, border.alpha = 0.2)
+```
+
+When you finished, remember to turn of the "view" option and return to the simple/static view ("plot").
+```{r}
+tmap_mode("plot")
+```
+
+# Distance between multiple points
+
+If you need the distance between the locations, you can run the following chunks.
+```{r}
+# First, compute the distance
+dist_matrix <- pointDistance(points_utm)                     
+dist_matrix <- as.data.frame(dist_matrix) %>% as_tibble
+# Change the units  of distance from meters to kilometers (or to another metric units) 
+dist_matrix <- dist_matrix / 1000
+# Save the distance matrix as a dataframe
+dist_matrix <- as.data.frame(dist_matrix)
+```
+
+The outcome is a matrix distance from the point _V1_ until the point _Vn_, and so on.
+
+In this case, we have only 19 locations, but in real life probably you work with a huge amount of points, so in those cases, it is difficult to read a matrix and figure out the number of each location. Fortunately, you can transform the matrix form into a data frame with only three columns, mean, _location_1_ , _location_2_, and _distance_.
+
+```{r}
+
+# Let´s change the number of each _V_ location to the real name. 
+dict <- data.frame(
+  # Add the number of points that you have (in this case it is 19)
+  local1 = paste0("V", 1:19),
+  # Select the column with the real names locations (e.g. Locality)
+  loc = pull(points_utm@data, Locality) 
+)
+```
+
+The result is a kind of dictionary with the information of each V location and the corresponding name. Next, we get the distance value from the distance matrix and set a new data frame with the structure mentioned above.
+
+```{r}
+
+dist <- dist_matrix %>% 
+  mutate(point = paste0("V", 1:19)) %>% 
+  gather(var, value, -point) %>% 
+  setNames(c("local1", "local2", "Distance")) %>% 
+  as_tibble() %>% 
+  inner_join(., dict, by = c("local1" = "local1")) %>% 
+  rename(loc_1 = loc) %>% 
+  inner_join(., dict, by = c("local2" = "local1")) %>% 
+  rename(loc_2 = loc) %>% 
+  dplyr::select(loc_1, loc_2, Distance)
+
+dist %>% 
+  top_n(x = ., n = 3, wt = Distance)
+```
+
+Finally, export the outcome.
+```{r}
+write.csv2(dist, "distances.csv")
+```
+
+# References
+
+- Lansley,G., Cheshire,J. (2016). An Introduction to Spatial Data Analysis and Visualisation in R. Available at https://data.cdrc.ac.uk/dataset/introduction-spatial-data-analysis-and-visualisation-r
+
+- https://www.youtube.com/watch?v=QMWxJ0bjdvg&t=529s
